@@ -7,6 +7,7 @@ on:
 jobs:
   flatpak:
     runs-on: ubuntu-latest
+    # We run the entire job inside this image
     container:
       image: registry.gitlab.com/freedesktop-sdk/infrastructure/freedesktop-sdk-docker-images/bst2:latest
       options: --privileged
@@ -22,10 +23,13 @@ jobs:
           ref: develop
           path: launcher-src
 
-      # FIXED: Added xvfb and flatpak to the install list
       - name: Install Build Tools
+        # We install everything we need in the current container
         run: |
-          apt-get update && apt-get install -y python3-pip git xvfb flatpak elfutils
+          apt-get update
+          apt-get install -y python3-pip git xvfb flatpak flatpak-builder elfutils curl
+          
+          # Install the generator
           pip3 install git+https://github.com/flatpak/flatpak-builder-tools.git#subdirectory=node --break-system-packages
 
       - name: Generate Node Sources
@@ -35,21 +39,34 @@ jobs:
             --no-requests \
             --recursive
 
-      # FIXED: Removed 'build-args'
       - name: Build Flatpak
-        uses: flatpak/flatpak-github-actions/flatpak-builder@v6
-        with:
-          bundle: org.flashpointarchive.Infinity.flatpak
-          manifest-path: org.flashpointarchive.Infinity.yml
-          repository-name: flathub
-          branch: master
-          # We enable caching to speed up subsequent runs
-          cache: true
+        run: |
+          # 1. Setup Flathub so we can download Runtime/SDK
+          flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
+          
+          # 2. Pre-install the Runtime and SDK (Action usually does this, now we do it)
+          # We use --user to avoid permission issues in some containers
+          flatpak install -y --noninteractive --user flathub org.freedesktop.Sdk//23.08
+          flatpak install -y --noninteractive --user flathub org.freedesktop.Platform//23.08
+          flatpak install -y --noninteractive --user flathub org.freedesktop.Sdk.Extension.node20//23.08
 
-      # NEW: Upload build logs if failure occurs
-      - name: Upload Build Log
-        if: failure()
+          # 3. Run the Build
+          # We use xvfb-run to fake a display, which Electron builds often require
+          xvfb-run -a flatpak-builder \
+            --user \
+            --force-clean \
+            --install-deps-from=flathub \
+            --repo=repo \
+            build-dir \
+            org.flashpointarchive.Infinity.yml
+
+      - name: Create Bundle (Optional)
+        run: |
+          flatpak build-bundle repo flashpoint-infinity.flatpak org.flashpointarchive.Infinity
+
+      - name: Upload Artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: build-log
-          path: .flatpak-builder/build/flashpoint-launcher/_flatpak_build.log
+          name: flashpoint-infinity.flatpak
+          path: flashpoint-infinity.flatpak

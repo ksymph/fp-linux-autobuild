@@ -12,12 +12,9 @@ jobs:
       options: --privileged
 
     steps:
-      # 1. Checkout this repository (The Manifest)
       - name: Checkout Manifest Repo
         uses: actions/checkout@v4
 
-      # 2. Checkout the External Launcher Repo
-      # We need this to access package-lock.json for the generator
       - name: Checkout Launcher Source
         uses: actions/checkout@v4
         with:
@@ -25,15 +22,12 @@ jobs:
           ref: develop
           path: launcher-src
 
-      # 3. Install Python Dependencies for the Generator
-      - name: Install Generator Tools
+      # FIXED: Added xvfb and flatpak to the install list
+      - name: Install Build Tools
         run: |
-          apt-get update && apt-get install -y python3-pip git
-          # Install directly from the official tools repo
+          apt-get update && apt-get install -y python3-pip git xvfb flatpak elfutils
           pip3 install git+https://github.com/flatpak/flatpak-builder-tools.git#subdirectory=node --break-system-packages
 
-      # 4. Run the Node Generator
-      # This reads the lockfile and creates generated-sources.json
       - name: Generate Node Sources
         run: |
           flatpak-node-generator npm launcher-src/package-lock.json \
@@ -41,13 +35,21 @@ jobs:
             --no-requests \
             --recursive
 
-      # 5. Build the Flatpak
-      # We allow network access during the build setup, but the build itself is offline
+      # FIXED: Removed 'build-args'
       - name: Build Flatpak
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           bundle: org.flashpointarchive.Infinity.flatpak
           manifest-path: org.flashpointarchive.Infinity.yml
-          # Helper to mount the generated sources so the builder can see them
-          build-args: |
-            --share=network
+          repository-name: flathub
+          branch: master
+          # We enable caching to speed up subsequent runs
+          cache: true
+
+      # NEW: Upload build logs if failure occurs
+      - name: Upload Build Log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: .flatpak-builder/build/flashpoint-launcher/_flatpak_build.log

@@ -1,0 +1,58 @@
+app-id: org.flashpointarchive.Infinity
+runtime: org.freedesktop.Platform
+runtime-version: '23.08'
+sdk: org.freedesktop.Sdk
+command: launch.sh 
+
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.node20
+
+finish-args:
+  - --share=ipc
+  - --socket=x11
+  - --socket=pulseaudio
+  - --share=network
+  - --device=dri
+
+modules:
+  # --- Module 1: The Launcher ---
+  - name: flashpoint-launcher
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/node20/bin
+      env:
+        # Prevent npm from trying to download the electron binary zip
+        ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    build-commands:
+      # 1. Initialize the offline node environment
+      - . .flatpak-node/flatpak-node-env.sh
+      
+      # 2. Install dependencies (uses the offline cache)
+      - npm install --offline
+      
+      # 3. Build the assets (compiles TS/React to ./dist or ./build)
+      # We are assuming 'npm run build' does NOT try to package the app (e.g. into an AppImage)
+      # If it does, we might need to run a specific script like 'npm run build-renderer'
+      - npm run build
+      
+      # 4. Install the artifacts
+      - mkdir -p /app/share/flashpoint-launcher
+      - cp -r dist/* /app/share/flashpoint-launcher/ || cp -r build/* /app/share/flashpoint-launcher/
+
+    sources:
+      # The Source Code
+      - type: git
+        url: https://github.com/FlashpointProject/launcher.git
+        branch: develop
+      
+      # The Generated Dependencies
+      # This file is created by the GitHub Action before the build starts
+      - generated-sources.json
+
+  # --- Module 2: Dummy Runner Script ---
+  - name: launcher-script
+    buildsystem: simple
+    build-commands:
+      - echo "#!/bin/sh" > /app/bin/launch.sh
+      - echo "echo 'Build Complete. Assets are in /app/share/flashpoint-launcher'" >> /app/bin/launch.sh
+      - chmod +x /app/bin/launch.sh

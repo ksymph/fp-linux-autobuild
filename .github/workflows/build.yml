@@ -1,0 +1,53 @@
+name: Build Flashpoint Infinity
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  flatpak:
+    runs-on: ubuntu-latest
+    container:
+      image: registry.gitlab.com/freedesktop-sdk/infrastructure/freedesktop-sdk-docker-images/bst2:latest
+      options: --privileged
+
+    steps:
+      # 1. Checkout this repository (The Manifest)
+      - name: Checkout Manifest Repo
+        uses: actions/checkout@v4
+
+      # 2. Checkout the External Launcher Repo
+      # We need this to access package-lock.json for the generator
+      - name: Checkout Launcher Source
+        uses: actions/checkout@v4
+        with:
+          repository: FlashpointProject/launcher
+          ref: develop
+          path: launcher-src
+
+      # 3. Install Python Dependencies for the Generator
+      - name: Install Generator Tools
+        run: |
+          apt-get update && apt-get install -y python3-pip git
+          # Install directly from the official tools repo
+          pip3 install git+https://github.com/flatpak/flatpak-builder-tools.git#subdirectory=node --break-system-packages
+
+      # 4. Run the Node Generator
+      # This reads the lockfile and creates generated-sources.json
+      - name: Generate Node Sources
+        run: |
+          flatpak-node-generator npm launcher-src/package-lock.json \
+            --out generated-sources.json \
+            --no-requests \
+            --recursive
+
+      # 5. Build the Flatpak
+      # We allow network access during the build setup, but the build itself is offline
+      - name: Build Flatpak
+        uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: org.flashpointarchive.Infinity.flatpak
+          manifest-path: org.flashpointarchive.Infinity.yml
+          # Helper to mount the generated sources so the builder can see them
+          build-args: |
+            --share=network
